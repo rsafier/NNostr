@@ -20,6 +20,7 @@ public static class NIP47
         private readonly string _mainPubKeyHex;
         private string subscriptionId = Guid.NewGuid().ToString();
         private readonly Channel<NostrEvent> _requests = Channel.CreateUnbounded<NostrEvent>();
+      
 
         public NostrWalletConnectServer(INostrClient nostrClient, ECPrivKey mainKey, string[] supportedCommands,
             Func<ECXOnlyPubKey, Nip47Request, CancellationToken, Task<Nip47Response>> requestHandler)
@@ -64,8 +65,9 @@ public static class NIP47
         {
             Nip47Response? response;
             try
-            {
-                var request = JsonSerializer.Deserialize<Nip47Request>(evt.Content);
+            { 
+                var decryptedContent = await evt.DecryptNip04EventAsync(_mainKey, null, true);
+                var request = JsonSerializer.Deserialize<Nip47Request>(decryptedContent);
 
                 if (!_supportedCommands.Contains(request.Method))
                 {
@@ -116,7 +118,7 @@ public static class NIP47
             {
                 if (nostrEvent.Kind != RequestEventKind ||
                     nostrEvent.GetTaggedPublicKeys().FirstOrDefault() != _mainPubKeyHex ||
-                    Math.Abs((DateTimeOffset.UtcNow - nostrEvent.CreatedAt)!.Value.TotalMinutes) <= 10 ||
+                    Math.Abs((DateTimeOffset.UtcNow - nostrEvent.CreatedAt)!.Value.TotalMinutes) >= 10 ||
                     !_seenEvents.Add(nostrEvent.Id))
                     continue;
 
@@ -181,7 +183,7 @@ public static class NIP47
     {
         NameValueCollection query = HttpUtility.ParseQueryString(string.Empty);
         query["relay"] = relay.ToString();
-        query["secret"] = secret.CreateXOnlyPubKey().ToHex();
+        query["secret"] = secret.ToHex();
         if (lud16 is not null)
             query["lud16"] = lud16;
         if (additionalRelays.Length > 0)
@@ -248,7 +250,7 @@ public static class NIP47
 
     public const int InfoEvent = 13194;
     public const int RequestEventKind = 23194;
-    public const int ResponseEventKind = 23194;
+    public const int ResponseEventKind = 23195;
 
     public class Nip47Request
     {
@@ -383,6 +385,11 @@ public static class NIP47
     public class GetInfoRequest : INIP47Request
     {
         public string Method => "get_info";
+    }
+
+    public class GetBalanceRequest : INIP47Request
+    {
+        public string Method => "get_balance";
     }
 
     public class GetInfoResponse
